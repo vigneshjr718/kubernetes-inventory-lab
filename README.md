@@ -68,8 +68,9 @@ The client communicates with `inventory-service` instead of communicating direct
 kubernetes-inventory-lab/
 │
 ├── app/
-│   ├── Dockerfile
-│   └── server.py
+│   ├──Dockerfile
+│   ├── requirements.txt
+│   ├──server.py
 │
 ├── k8s/
 │   ├── inventory-deployment.yaml
