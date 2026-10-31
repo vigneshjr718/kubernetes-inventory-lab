@@ -2,60 +2,63 @@
 
 ## Overview
 
-This project demonstrates core Kubernetes concepts including **Deployments, Services, service discovery, readiness probes, load balancing, Pod failure, and automatic Pod replacement**.
+This project demonstrates Kubernetes **service discovery, load balancing, readiness probes, traffic management, and automatic Pod replacement** using a small Inventory application.
 
 The application consists of:
 
-- An **Inventory Service** running with two replicas.
-- A Kubernetes **Service** that exposes the Inventory Pods.
-- A **client Pod** that communicates with the Inventory application using the Kubernetes Service name instead of individual Pod IP addresses.
-- A **readiness probe** that controls whether an Inventory Pod is eligible to receive traffic.
-- Kubernetes self-healing behavior that automatically creates a replacement when an Inventory Pod is deleted.
+- An **Inventory Deployment** with 2 replicas
+- An **Inventory Service** that provides a stable Kubernetes Service name
+- An **Inventory Client Pod** that sends requests to the Inventory Service
+- A **readiness probe** that determines whether an Inventory Pod should receive Service traffic
+- Kubernetes self-healing that automatically replaces a deleted Inventory Pod
+
+The lab was implemented using **Docker Desktop Kubernetes**.
 
 ---
 
 ## Architecture
 
 ```text
-                     Kubernetes Cluster
-+-------------------------------------------------------+
-|                                                       |
-|                     Client Pod                        |
-|                         |                             |
-|                         | HTTP Request                |
-|                         | http://inventory-service    |
-|                         v                             |
-|               +-------------------+                   |
-|               | Inventory Service |                  |
-|               |    ClusterIP      |                  |
-|               +---------+---------+                   |
-|                         |                             |
-|                  Load Balancing                       |
-|                    /         \                        |
-|                   v           v                       |
-|          +-------------+ +-------------+              |
-|          | Inventory   | | Inventory   |              |
-|          |   Pod 1     | |   Pod 2     |              |
-|          |   Ready     | |   Ready     |              |
-|          +-------------+ +-------------+              |
-|                                                       |
-|              Inventory Deployment                     |
-|                   replicas: 2                         |
-+-------------------------------------------------------+
+                     Docker Desktop Kubernetes
++---------------------------------------------------------+
+|                                                         |
+|                   inventory-client                      |
+|                          |                              |
+|                          | HTTP                         |
+|                          | inventory-service:8080       |
+|                          v                              |
+|                +---------------------+                  |
+|                |  inventory-service  |                  |
+|                |     ClusterIP       |                  |
+|                +----------+----------+                  |
+|                           |                             |
+|                    Service Routing                      |
+|                     /           \                       |
+|                    v             v                      |
+|          +---------------+   +---------------+          |
+|          | Inventory Pod |   | Inventory Pod |          |
+|          |   Replica 1   |   |   Replica 2   |          |
+|          +---------------+   +---------------+          |
+|                                                         |
+|             Inventory Deployment                        |
+|                  replicas: 2                            |
++---------------------------------------------------------+
 ```
 
-The client does not communicate directly with a specific Inventory Pod. Instead, it sends requests to `inventory-service`. Kubernetes service discovery resolves this name and routes requests to available ready Pods.
+The client communicates with `inventory-service` instead of communicating directly with individual Pod IP addresses.
 
 ---
 
 ## Technologies Used
 
-- Kubernetes
-- Minikube
-- Docker
+- Docker Desktop
+- Docker Desktop Kubernetes
 - kubectl
 - Python
-- Flask
+- Kubernetes Deployments
+- Kubernetes Services
+- Kubernetes readiness probes
+- BusyBox client container
 
 ---
 
@@ -63,270 +66,316 @@ The client does not communicate directly with a specific Inventory Pod. Instead,
 
 ```text
 kubernetes-inventory-lab/
-|
-|-- app.py
-|-- Dockerfile
-|-- deployment.yaml
-|-- service.yaml
-|-- client.yaml
-|-- README.md
+│
+├── app/
+│   ├── Dockerfile
+│   └── server.py
+│
+├── k8s/
+│   ├── inventory-deployment.yaml
+│   ├── inventory-service.yaml
+│   └── client.yaml
+│
+├── evidence/
+│   ├── 01-docker-kubernetes-pods-running.png
+│   ├── 02-two-inventory-replicas-running.png
+│   ├── 03-service-name-communication.png
+│   ├── 04-traffic-reaches-both-replicas.png
+│   ├── 05-readiness-failure.png
+│   ├── 06-unready-pod-removed-from-traffic.png
+│   ├── 07-readiness-restored.png
+│   ├── 08-pod-deletion-and-replacement.png
+│   └── 09-service-unchanged-after-replacement.png
+│
+└── README.md
 ```
 
 ---
 
-# 1. Inventory Application
+# 1. Build the Inventory Application
 
-The Inventory application is a simple HTTP service. Each response includes the hostname of the Pod that processed the request.
-
-This makes it possible to demonstrate that requests sent through the Kubernetes Service can reach different Inventory replicas.
-
-Example response:
+The Inventory application is packaged into a Docker image named:
 
 ```text
-Inventory response from inventory-xxxxxxxxxx-abcde
+inventory-service:v1
+```
+
+From the project root, build the image using:
+
+```powershell
+docker build -t inventory-service:v1 .\app
+```
+
+Verify the image:
+
+```powershell
+docker images inventory-service
 ```
 
 ---
 
-# 2. Docker Image
+# 2. Deploy the Application
 
-The Inventory application is packaged into a Docker container using the included `Dockerfile`.
+The Kubernetes manifests are stored inside the `k8s` directory.
 
-When using Minikube, the image can be built directly into Minikube's container environment.
+### Create the Inventory Service
 
-Example:
-
-```bash
-minikube image build -t inventory-app:v1 .
+```powershell
+kubectl apply -f .\k8s\inventory-service.yaml
 ```
 
-The image can then be verified using:
+### Create the Inventory Deployment
 
-```bash
-minikube image ls
+```powershell
+kubectl apply -f .\k8s\inventory-deployment.yaml
+```
+
+### Create the Client Pod
+
+```powershell
+kubectl apply -f .\k8s\client.yaml
+```
+
+Verify the resources:
+
+```powershell
+kubectl get pods -o wide
 ```
 
 ---
 
-# 3. Inventory Deployment
+# 3. Two Inventory Replicas
 
-The Inventory application is deployed using a Kubernetes Deployment.
-
-The Deployment is configured with:
+The Inventory Deployment is configured with:
 
 ```yaml
 replicas: 2
 ```
 
-This ensures that Kubernetes maintains two Inventory Pods.
+Kubernetes therefore maintains two instances of the Inventory application.
 
-The Deployment can be created using:
+The running resources were verified using:
 
-```bash
-kubectl apply -f deployment.yaml
+```powershell
+kubectl get pods -o wide
 ```
 
-The Pods can be checked using:
-
-```bash
-kubectl get pods
-```
-
-Expected result:
+Both Inventory Pods reached:
 
 ```text
-NAME                         READY   STATUS    RESTARTS   AGE
-inventory-xxxxxxxxxx-xxxxx   1/1     Running   0          ...
-inventory-xxxxxxxxxx-xxxxx   1/1     Running   0          ...
+READY   STATUS
+1/1     Running
+1/1     Running
 ```
 
-Both Inventory replicas should be in the `Running` and `Ready` state.
+The `inventory-client` Pod was also running.
+
+## Evidence
+
+The following screenshot shows Docker Desktop Kubernetes running the Inventory Deployment and client:
+
+![Docker Desktop Kubernetes Pods Running](evidence/01-docker-kubernetes-pods-running.png)
+
+The following screenshot confirms that both Inventory replicas are `1/1 Running`:
+
+![Two Inventory Replicas Running](evidence/02-two-inventory-replicas-running.png)
+
+This satisfies the requirement to deploy **two Inventory replicas**.
 
 ---
 
-# 4. Kubernetes Service
+# 4. Kubernetes Service Discovery
 
-A Kubernetes Service exposes the Inventory replicas using a stable Service name:
+The Inventory Pods are exposed through a Kubernetes Service named:
 
 ```text
 inventory-service
 ```
 
-The Service is created using:
+The client communicates with this Service instead of using an individual Inventory Pod IP address.
 
-```bash
-kubectl apply -f service.yaml
-```
-
-The Service can be verified using:
-
-```bash
-kubectl get services
-```
-
-The Service provides a stable endpoint even though individual Pods can be created, deleted, or replaced.
-
-The client therefore communicates with:
+The application is accessed internally using:
 
 ```text
-http://inventory-service
+inventory-service:8080
 ```
 
-instead of using individual Pod IP addresses.
+and the Inventory endpoint is:
+
+```text
+/inventory
+```
+
+The following request was executed from the client:
+
+```powershell
+kubectl exec inventory-client -- sh -c "printf 'GET /inventory HTTP/1.0\r\nHost: inventory-service\r\n\r\n' | nc inventory-service 8080"
+```
+
+The request returned:
+
+```text
+HTTP/1.0 200 OK
+```
+
+along with the Inventory response and the hostname of the Pod that processed the request.
+
+## Evidence
+
+![Service Name Communication](evidence/03-service-name-communication.png)
+
+This demonstrates that the client successfully communicates using the Kubernetes Service name **`inventory-service`**, rather than an individual Pod address.
 
 ---
 
-# 5. Client Pod
+# 5. Requests Reach Multiple Replicas
 
-A separate client Pod is used to communicate with the Inventory Service.
+The Inventory application returns the hostname of the Pod processing each request.
 
-The client can be created using:
+This allows the Kubernetes Service routing behavior to be observed directly.
 
-```bash
-kubectl apply -f client.yaml
+Ten requests were sent through `inventory-service`:
+
+```powershell
+kubectl exec inventory-client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do printf 'GET /inventory HTTP/1.0\r\nHost: inventory-service\r\n\r\n' | nc inventory-service 8080 | grep 'Inventory response from Pod'; done"
 ```
 
-Verify that it is running:
+The output contained **two different Inventory Pod names**, demonstrating that requests sent through the Service can reach more than one replica.
 
-```bash
+## Evidence
+
+![Traffic Reaches Both Replicas](evidence/04-traffic-reaches-both-replicas.png)
+
+This demonstrates:
+
+- The client communicates through `inventory-service`
+- Multiple Inventory replicas are available behind the Service
+- Requests can reach more than one Inventory replica
+
+---
+
+# 6. Readiness Probe
+
+The Inventory Deployment includes a readiness probe.
+
+The readiness probe checks whether the Inventory application is currently ready to receive normal Service traffic.
+
+A healthy Inventory Pod appears as:
+
+```text
+1/1 Running
+```
+
+A Pod that fails its readiness probe can remain running while becoming:
+
+```text
+0/1 Running
+```
+
+This allows Kubernetes to temporarily remove a Pod from Service traffic without terminating the container.
+
+---
+
+# 7. Readiness Failure Test
+
+To demonstrate readiness behavior, one Inventory Pod was intentionally made unready.
+
+The Inventory application's `/health` endpoint checks for the existence of:
+
+```text
+/tmp/ready
+```
+
+The readiness file was removed from one Pod:
+
+```powershell
+kubectl exec <inventory-pod-name> -- rm /tmp/ready
+```
+
+After waiting for the readiness probe to detect the change:
+
+```powershell
 kubectl get pods
 ```
 
-The client sends requests using the Kubernetes Service name.
-
-Example:
-
-```bash
-kubectl exec client -- wget -qO- http://inventory-service
-```
-
-This demonstrates Kubernetes service discovery because `inventory-service` is resolved inside the cluster without requiring the IP address of an Inventory Pod.
-
----
-
-# 6. Multiple Inventory Replicas
-
-Multiple requests can be sent from the client to demonstrate that the Service can route traffic to more than one Inventory replica.
-
-Example:
-
-```bash
-kubectl exec client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do wget -qO- http://inventory-service; echo; done"
-```
-
-Because each Inventory response contains the Pod hostname, responses from different Pod names demonstrate that multiple replicas can receive requests.
-
-This shows that the client communicates through the Service rather than being tied to one specific Pod.
-
----
-
-# 7. Readiness Probe
-
-The Inventory Deployment includes a Kubernetes readiness probe.
-
-Example configuration:
-
-```yaml
-readinessProbe:
-  httpGet:
-    path: /ready
-    port: 5000
-  initialDelaySeconds: 5
-  periodSeconds: 5
-```
-
-The readiness probe determines whether a Pod should receive normal Service traffic.
-
-A Pod can still be:
+showed one Inventory Pod as:
 
 ```text
-STATUS: Running
+0/1 Running
 ```
 
-while simultaneously being:
+while the other Inventory Pod remained:
 
 ```text
-READY: 0/1
+1/1 Running
 ```
 
-When this happens, Kubernetes removes the Pod from the Service's ready endpoints.
+## Evidence
+
+![Readiness Failure](evidence/05-readiness-failure.png)
+
+This is important because the failed Pod is **still running**, but Kubernetes no longer considers it ready to receive normal traffic.
 
 ---
 
-# 8. Readiness Failure Test
+# 8. Unready Pod Stops Receiving Traffic
 
-To demonstrate readiness behavior, one Inventory Pod is intentionally made to fail its readiness check.
+After one Pod became unready, another set of requests was sent through the Kubernetes Service:
 
-The Pod remains running, but Kubernetes marks it as unready.
+```powershell
+kubectl exec inventory-client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do printf 'GET /inventory HTTP/1.0\r\nHost: inventory-service\r\n\r\n' | nc inventory-service 8080 | grep 'Inventory response from Pod'; done"
+```
 
-Pod status can be checked using:
+All requests were handled by the **remaining ready Inventory Pod**.
 
-```bash
+The Pod that was `0/1` did not appear in the responses.
+
+## Evidence
+
+![Unready Pod Removed From Traffic](evidence/06-unready-pod-removed-from-traffic.png)
+
+This demonstrates that:
+
+- The unready Pod remained running
+- The unready Pod stopped receiving normal Service traffic
+- The second ready Pod continued serving requests
+- The Inventory Service remained available
+
+---
+
+# 9. Restore Readiness
+
+Readiness was restored by recreating `/tmp/ready` inside the previously unready Pod:
+
+```powershell
+kubectl exec <inventory-pod-name> -- touch /tmp/ready
+```
+
+After allowing the readiness probe to run again:
+
+```powershell
 kubectl get pods
 ```
 
-The Service endpoints can also be inspected using:
-
-```bash
-kubectl get endpoints inventory-service
-```
-
-or:
-
-```bash
-kubectl get endpointslices
-```
-
-Requests are then sent from the client again:
-
-```bash
-kubectl exec client -- sh -c "for i in 1 2 3 4 5; do wget -qO- http://inventory-service; echo; done"
-```
-
-While one Pod is unready, normal Service traffic is sent only to the remaining ready Inventory Pod.
-
-This demonstrates an important distinction:
-
-**Readiness failure does not necessarily terminate a Pod. It prevents the Pod from receiving normal Service traffic.**
-
----
-
-# 9. Restoring Readiness
-
-After the readiness condition is restored, Kubernetes detects that the Pod is healthy again.
-
-The status can be checked using:
-
-```bash
-kubectl get pods
-```
-
-Both Pods should return to:
+showed both Inventory Pods as:
 
 ```text
-READY   STATUS
-1/1     Running
+1/1 Running
 ```
 
-The Service endpoints can be checked again:
+## Evidence
 
-```bash
-kubectl get endpoints inventory-service
-```
+![Readiness Restored](evidence/07-readiness-restored.png)
 
-Requests can then be repeated:
+The previously unready Pod returned to the ready state and became eligible to receive Service traffic again.
 
-```bash
-kubectl exec client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do wget -qO- http://inventory-service; echo; done"
-```
-
-After readiness is restored, the previously unready Pod becomes eligible to receive Service traffic again.
+This completes the readiness test by demonstrating both **readiness failure and recovery**.
 
 ---
 
-# 10. Pod Failure and Recovery
+# 10. Pod Failure and Automatic Recovery
 
-Kubernetes Deployments continuously attempt to maintain the desired number of replicas.
+Kubernetes Deployments maintain the desired number of replicas.
 
 The Inventory Deployment specifies:
 
@@ -334,63 +383,70 @@ The Inventory Deployment specifies:
 replicas: 2
 ```
 
-One Inventory Pod can be manually deleted to simulate a Pod failure.
+To demonstrate Pod failure and recovery, one Inventory Pod was manually deleted:
 
-First, list the Pods:
-
-```bash
-kubectl get pods
-```
-
-Then delete one Inventory Pod:
-
-```bash
+```powershell
 kubectl delete pod <inventory-pod-name>
 ```
 
-For example:
+Kubernetes detected that the Deployment had fewer than two replicas and automatically created a replacement Pod.
 
-```bash
-kubectl delete pod inventory-xxxxxxxxxx-xxxxx
+The Pods were checked using:
+
+```powershell
+kubectl get pods
 ```
 
-Immediately after deletion, Kubernetes detects that the Deployment has fewer replicas than requested and creates a replacement Pod.
+The replacement Inventory Pod had a **different Pod name/identity** from the deleted Pod.
 
-This can be observed using:
+## Evidence
 
-```bash
-kubectl get pods -w
-```
+![Pod Deletion and Replacement](evidence/08-pod-deletion-and-replacement.png)
 
-The replacement Pod receives a different Pod name and identity from the deleted Pod.
+This demonstrates:
+
+- An Inventory Pod was manually deleted
+- Kubernetes detected the missing replica
+- Kubernetes automatically created a replacement
+- The replacement received a different Pod identity/name
+- The Deployment returned to two running Inventory replicas
 
 ---
 
-# 11. Service Stability During Pod Replacement
+# 11. Service Remains Stable After Pod Replacement
 
-Although an individual Inventory Pod is deleted and replaced, the Kubernetes Service does not change.
+Although an Inventory Pod was deleted and replaced, the Kubernetes Service remained unchanged.
 
-The Service can be checked using:
+The Service was verified using:
 
-```bash
+```powershell
 kubectl get service inventory-service
 ```
 
-The client continues to use:
+The Service remained:
 
 ```text
-http://inventory-service
+inventory-service
 ```
 
-Requests can be tested again using:
+The client then sent another request using the same Service:
 
-```bash
-kubectl exec client -- wget -qO- http://inventory-service
+```powershell
+kubectl exec inventory-client -- sh -c "printf 'GET /inventory HTTP/1.0\r\nHost: inventory-service\r\n\r\n' | nc inventory-service 8080 | grep 'Inventory response from Pod'"
 ```
 
-Therefore, the client does not need to know that an Inventory Pod was deleted or replaced.
+The request successfully returned an Inventory response.
 
-This demonstrates why Kubernetes Services provide a stable abstraction over dynamic Pods.
+## Evidence
+
+![Service Unchanged After Replacement](evidence/09-service-unchanged-after-replacement.png)
+
+This demonstrates that:
+
+- The Service name remained unchanged
+- The client did not need to know the new Pod name
+- The client continued communicating through `inventory-service`
+- Pod replacement did not require changes to the client
 
 ---
 
@@ -398,174 +454,205 @@ This demonstrates why Kubernetes Services provide a stable abstraction over dyna
 
 The Pod deletion experiment demonstrates Kubernetes self-healing.
 
-The Deployment controller continuously compares:
+The desired state of the Inventory Deployment is:
 
 ```text
-Desired replicas = 2
-Actual replicas  = 2
+Desired replicas: 2
 ```
 
-If a Pod disappears:
+When one Pod was deleted, the actual number of replicas temporarily became:
 
 ```text
-Desired replicas = 2
-Actual replicas  = 1
+Actual replicas: 1
 ```
 
-Kubernetes automatically creates another Pod until the desired state is restored.
+The Deployment controller detected the difference and automatically created another Pod until the desired state was restored:
 
-The replacement Pod has a new identity, while the Deployment and Service remain unchanged.
+```text
+Desired replicas: 2
+Actual replicas: 2
+```
+
+The replacement Pod had a new identity, while the Inventory Service remained stable.
 
 ---
 
-# 13. Useful Commands
+# Assignment Requirements
 
-Check cluster status:
+## 1. Deploy the Application
 
-```bash
+- [x] Inventory Deployment created
+- [x] Deployment configured with 2 replicas
+- [x] Both Inventory Pods running
+- [x] Kubernetes Service exposes the Inventory replicas
+- [x] Client Pod created
+- [x] Client communicates using `inventory-service`
+- [x] Client does not depend on individual Pod IP addresses
+- [x] Requests reach more than one Inventory replica
+
+### Evidence
+
+- `01-docker-kubernetes-pods-running.png`
+- `02-two-inventory-replicas-running.png`
+- `03-service-name-communication.png`
+- `04-traffic-reaches-both-replicas.png`
+
+---
+
+## 2. Readiness Test
+
+- [x] Readiness probe configured
+- [x] One Inventory Pod intentionally fails readiness
+- [x] Pod remains running while becoming `0/1`
+- [x] Unready Pod stops receiving normal Service traffic
+- [x] Other ready Pod continues serving requests
+- [x] Readiness is restored
+- [x] Pod returns to `1/1 Running`
+
+### Evidence
+
+- `05-readiness-failure.png`
+- `06-unready-pod-removed-from-traffic.png`
+- `07-readiness-restored.png`
+
+---
+
+## 3. Pod Failure and Recovery
+
+- [x] One Inventory Pod manually deleted
+- [x] Kubernetes automatically creates a replacement
+- [x] Replacement Pod has a different identity/name
+- [x] Desired replica count returns to 2
+- [x] `inventory-service` remains unchanged
+- [x] Client continues communicating through the same Service
+
+### Evidence
+
+- `08-pod-deletion-and-replacement.png`
+- `09-service-unchanged-after-replacement.png`
+
+---
+
+# Useful Commands
+
+### Check Kubernetes nodes
+
+```powershell
 kubectl get nodes
 ```
 
-Check all Pods:
+### Check Pods
 
-```bash
+```powershell
 kubectl get pods
 ```
 
-Show additional Pod information:
+### Check detailed Pod information
 
-```bash
+```powershell
 kubectl get pods -o wide
 ```
 
-Check the Deployment:
+### Check Deployments
 
-```bash
+```powershell
 kubectl get deployments
 ```
 
-Check Services:
+### Check Services
 
-```bash
+```powershell
 kubectl get services
 ```
 
-Check Inventory Service endpoints:
+### Check the Inventory Service
 
-```bash
+```powershell
+kubectl get service inventory-service
+```
+
+### Check Service endpoints
+
+```powershell
 kubectl get endpoints inventory-service
 ```
 
-Check EndpointSlices:
+### Describe a Pod
 
-```bash
-kubectl get endpointslices
-```
-
-Describe the Inventory Deployment:
-
-```bash
-kubectl describe deployment inventory
-```
-
-Describe a Pod:
-
-```bash
+```powershell
 kubectl describe pod <pod-name>
 ```
 
-View application logs:
+### View Pod logs
 
-```bash
+```powershell
 kubectl logs <pod-name>
 ```
 
-Watch Pod changes:
-
-```bash
-kubectl get pods -w
-```
-
-Send a request from the client:
-
-```bash
-kubectl exec client -- wget -qO- http://inventory-service
-```
-
 ---
 
-# 14. Lab Results
-
-The implementation demonstrates the following Kubernetes behaviors:
-
-### Deployment and Service Discovery
-
-- The Inventory application runs with two replicas.
-- Both Inventory Pods can run simultaneously.
-- A Kubernetes Service exposes the replicas.
-- The client communicates using the Service name `inventory-service`.
-- The client does not require individual Pod IP addresses.
-- Requests can reach more than one Inventory replica.
-
-### Readiness
-
-- Each Inventory Pod has a readiness probe.
-- A Pod can remain running while being marked unready.
-- An unready Pod is removed from normal Service traffic.
-- Other ready replicas continue serving requests.
-- Once readiness is restored, the Pod becomes eligible to receive traffic again.
-
-### Failure and Recovery
-
-- An Inventory Pod can be manually deleted.
-- Kubernetes automatically creates a replacement.
-- The replacement has a different Pod identity/name.
-- The number of desired replicas returns to two.
-- The Kubernetes Service remains unchanged.
-- The client continues communicating through the same Service name.
-
----
-
-# 15. Key Concepts Demonstrated
+# Key Concepts Demonstrated
 
 ## Service Discovery
 
-Kubernetes provides internal DNS-based service discovery. The client can access the Inventory application using:
+Kubernetes provides internal DNS-based service discovery. The client accesses the Inventory application using:
 
 ```text
 inventory-service
 ```
 
-instead of tracking individual Pod IP addresses.
+rather than tracking individual Inventory Pod IP addresses.
 
-## Load Balancing
+## Service Routing
 
-The Kubernetes Service distributes connections among available ready Inventory Pods.
+The Kubernetes Service routes requests to available ready Inventory Pods. Requests in this lab were observed reaching both replicas.
 
 ## Readiness
 
-Readiness probes prevent Pods that are temporarily unable to serve requests from receiving normal Service traffic.
+Readiness probes determine whether a Pod should receive normal Service traffic.
+
+A Pod can remain:
+
+```text
+Running
+```
+
+while being:
+
+```text
+0/1
+```
+
+and therefore not receive normal Service traffic.
 
 ## Self-Healing
 
-Deployments maintain the desired number of replicas. When a managed Pod disappears, Kubernetes automatically creates a replacement.
+The Deployment continuously maintains the desired number of Inventory replicas.
+
+When an Inventory Pod was manually deleted, Kubernetes automatically created a replacement.
 
 ## Stable Service Endpoint
 
-Pods are temporary and their names and IP addresses can change. A Kubernetes Service provides a stable endpoint that remains available while backend Pods are replaced.
+Pod names and IP addresses can change during replacement. The Kubernetes Service provides a stable endpoint that remains unchanged.
+
+The client therefore continues using:
+
+```text
+inventory-service
+```
+
+regardless of which Inventory Pods currently exist.
 
 ---
 
-# 16. Conclusion
+# Conclusion
 
-This lab demonstrates how Kubernetes provides reliable communication and automatic recovery for containerized applications.
+This lab demonstrates several fundamental Kubernetes behaviors using a two-replica Inventory application.
 
-The Inventory application runs with two replicas behind a Kubernetes Service. The client communicates through the stable Service name rather than individual Pods. Readiness probes ensure that only ready Pods receive normal traffic, while the Deployment controller automatically replaces deleted Pods.
+The Inventory Deployment successfully maintained two application replicas behind the `inventory-service` Kubernetes Service. The client communicated using the Service name rather than individual Pod addresses, and requests were observed reaching multiple replicas.
 
-The experiments demonstrate three important Kubernetes principles:
+The readiness test demonstrated that an Inventory Pod can remain running while being marked unready. Kubernetes stopped routing normal Service traffic to the unready Pod while the other replica continued serving requests. After readiness was restored, the Pod returned to the ready state.
 
-1. **Service discovery and stable networking** allow clients to communicate without tracking individual Pods.
-2. **Readiness probes** prevent unhealthy or temporarily unavailable Pods from receiving normal traffic.
-3. **Deployments provide self-healing** by automatically replacing failed or deleted Pods.
+Finally, manually deleting an Inventory Pod demonstrated Kubernetes self-healing. Kubernetes automatically created a replacement Pod with a different identity while maintaining the desired replica count. The `inventory-service` Service remained unchanged, and the client continued communicating through the same stable Service endpoint.
 
-Together, these mechanisms allow applications to remain available even when individual Pods become unready or are replaced.
+Together, these tests demonstrate **Kubernetes service discovery, readiness-based traffic management, stable service networking, and automatic Pod recovery**.
