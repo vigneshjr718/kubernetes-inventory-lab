@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: inventory-client
+  labels:
+    app: inventory-client
+spec:
+  containers:
+    - name: client
+      image: curlimages/curl:8.10.1
+      command:
+        - sh
+        - -c
+        - |
+          echo "Inventory client started"
+          while true; do
+            echo "----- Request -----"
+            date
+            curl -s http://inventory-service:8080/inventory
+            sleep 3
+          done
