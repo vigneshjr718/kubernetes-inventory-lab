@@ -646,6 +646,10 @@ regardless of which Inventory Pods currently exist.
 
 ---
 
+# Reflection
+
+A stable Kubernetes Service name is useful because Pods are temporary and can be deleted, restarted, or replaced at any time. When a replacement Pod is created, it receives a new identity and may also receive a different IP address. The client does not need to track these changes because it always communicates through the same `inventory-service` Service name. This makes communication between applications more reliable and allows Kubernetes to replace unhealthy Pods without requiring changes to the client.
+
 # Conclusion
 
 This lab demonstrates several fundamental Kubernetes behaviors using a two-replica Inventory application.
